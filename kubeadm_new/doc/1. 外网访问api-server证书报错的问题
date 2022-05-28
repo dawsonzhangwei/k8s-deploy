@@ -1,0 +1,70 @@
+错误：Unable to connect to the server: x509: certificate is valid for xxx, not xxx 的解决方案
+
+cd /etc/kubernetes/pki
+openssl x509 -noout -text -in apiserver.crt |grep IP
+                DNS:k8s-master, DNS:kubernetes, DNS:kubernetes.default, DNS:kubernetes.default.svc, DNS:kubernetes.default.svc.cluster.local, IP Address:10.96.0.1, IP Address:172.25.1.100
+
+kubeadm init phase certs apiserver \
+--apiserver-advertise-address 172.25.1.100 \
+--apiserver-cert-extra-sans  10.96.0.1
+
+
+【https://www.jianshu.com/p/2550dba811e7】
+解决k8s集群 Unable to connect to the server: x509: certificate is valid for xxx, not xxx问题
+
+MrYe
+2022.04.24 17:17:56
+字数 396
+阅读 359
+错误：Unable to connect to the server: x509: certificate is valid for xxx, not xxx 的解决方案
+为了能使本地能连接k8s集群更好的测试client-go的功能，我在服务器上为本地签发了kubeconfig文件，放到本地之后出现如下的错误。
+
+➜  ~ kubectl get node
+Unable to connect to the server: x509: certificate is valid for 10.96.0.1, 172.25.1.100, not 10.8.5.5
+通过查阅资料发现了一个kubectl的参数--insecure-skip-tls-verify，加上这个参数之后确实好使了，但是，总是感觉治标不治本，所以经过一番查阅是apiserver的证书中没有添加10.8.5.5这个ip导致的，需要重新生成一下证书，具体操作如下：
+
+查看apiserver证书信息
+cd /etc/kubernetes/pki
+openssl x509 -noout -text -in apiserver.crt |grep IP
+                DNS:k8s-master, DNS:kubernetes, DNS:kubernetes.default, DNS:kubernetes.default.svc, DNS:kubernetes.default.svc.cluster.local, IP Address:10.96.0.1, IP Address:172.25.1.100
+从上面可以看出ip中并没有报错信息中的10.8.5.5这个IP地址，所以需要重新生成。
+
+删除旧证书
+mkdir -pv /opt/cert
+mv apiserver.* /opt/cert
+为了保险起见，这里选择将证书移动到其他位置。
+
+生成新的apiserver证书
+kubeadm init phase certs apiserver \
+--apiserver-advertise-address 172.25.1.100 \
+--apiserver-cert-extra-sans  10.96.0.1 \
+--apiserver-cert-extra-sans 10.8.5.5 \
+--apiserver-cert-extra-sans 10.8.5.6 \
+--apiserver-cert-extra-sans 10.8.5.7 \
+--apiserver-cert-extra-sans 10.8.5.8 \
+--apiserver-cert-extra-sans 10.8.5.9 \
+--apiserver-cert-extra-sans 10.8.5.10 \
+--apiserver-cert-extra-sans 10.8.5.11 \
+--apiserver-cert-extra-sans 10.8.5.12 \
+--apiserver-cert-extra-sans 10.8.5.13 \
+--apiserver-cert-extra-sans 10.8.5.14 \
+--apiserver-cert-extra-sans 10.8.5.15 \
+--apiserver-cert-extra-sans 10.8.5.16 \
+--apiserver-cert-extra-sans 10.8.5.17
+--apiserver-cert-extra-sans参数后可以加上需要添加的IP地址，这里为了省事儿一次性添加了多个，具体情况按需添加即可。
+
+检查证书
+ls apiserver.*
+apiserver.crt  apiserver.key
+通过检查可以看到新的证书已经成了，现在只需要重启apiserver即可。如果出现问题，可以删除新的证书，将老的证书移回原位，重启apiserver即可。
+
+重启服务
+systemctl restart kubelet.service
+验证
+➜  ~ kubectl get pod
+NAME                                      READY   STATUS    RESTARTS   AGE
+kucc4                                     3/3     Running   0          39d
+nfs-client-provisioner-585486cc88-wqmzj   1/1     Running   6          40d
+nginx-kusc00401                           1/1     Running   0          39d
+web-server                                1/1     Running   0          39d
+可以看到现在不加参数也不出现报错了，到这里就已经大功告成了。
